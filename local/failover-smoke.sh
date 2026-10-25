@@ -30,7 +30,8 @@ spec:
         - name: c
           image: $img
           command: ["/bin/bash", "-ec"]
-          args: ['cd /opt/activemq && bin/activemq $* --brokerUrl "$url" --user "\$U" --password "\$P" --destination "$q"']
+          # bin/activemq evals its args, so the URL needs an extra layer of quotes
+          args: ['cd /opt/activemq && bin/activemq $* --brokerUrl "''$url''" --user "\$U" --password "\$P" --destination "$q"']
           env:
             - { name: U, valueFrom: { secretKeyRef: { name: $secret, key: BROKER_USERNAME } } }
             - { name: P, valueFrom: { secretKeyRef: { name: $secret, key: BROKER_PASSWORD } } }

@@ -52,7 +52,7 @@ done
 [[ -n ${m:-} ]] || { echo "no master after 4 min; check: kubectl -n $NS logs -l app.kubernetes.io/instance=$REL"; exit 1; }
 
 kubectl -n "$NS" get pods -o wide
-helm test "$REL" -n "$NS" --logs
+helm test "$REL" -n "$NS"
 cat <<INFO
 
 Master: $m
