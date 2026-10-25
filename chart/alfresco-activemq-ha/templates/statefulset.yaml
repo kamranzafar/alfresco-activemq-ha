@@ -1,0 +1,178 @@
+{{- $t := .Values.broker.transports }}
+{{- $sv := .Values.persistence.sharedVolume }}
+{{- $shared := eq .Values.persistence.mode "sharedVolume" }}
+{{- $ak := .Values.auth.existingSecret.keys }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "amq.fullname" . }}
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "amq.fullname" . }}-hl
+  replicas: {{ .Values.replicaCount }}
+  # Parallel: the standby never becomes Ready, so OrderedReady could block pod
+  # creation forever when pod-1 holds the lock.
+  podManagementPolicy: Parallel
+  # OnDelete: a RollingUpdate would wait forever for the restarted standby to be
+  # Ready. Roll changes out with scripts/rolling-restart.sh (standby first).
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      {{- include "amq.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "amq.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      affinity:
+      {{- if .Values.affinity }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else }}
+        podAntiAffinity:
+          {{- if eq .Values.antiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "amq.selectorLabels" . | nindent 18 }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "amq.selectorLabels" . | nindent 20 }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.zoneSpread }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "amq.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and $shared $sv.fixPermissions }}
+      initContainers:
+        - name: volume-permissions
+          image: {{ .Values.volumePermissions.image }}
+          command:
+            - sh
+            - -c
+            - >-
+              mkdir -p {{ $sv.mountPath }}/kahadb &&
+              chown {{ .Values.podSecurityContext.runAsUser }}:{{ .Values.podSecurityContext.runAsGroup }} {{ $sv.mountPath }} {{ $sv.mountPath }}/kahadb
+              || echo "warning: could not chown the shared volume (expected on EFS access points)"
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - { name: store, mountPath: {{ $sv.mountPath }} }
+      {{- end }}
+      containers:
+        - name: activemq
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            # Read by the image entrypoint (-Dactivemq.brokername) and used in activemq.xml
+            - name: ACTIVEMQ_BROKER_NAME
+              value: {{ .Values.broker.name | quote }}
+            # Set explicitly: the entrypoint appends to ACTIVEMQ_OPTS, which would
+            # otherwise suppress ActiveMQ's defaults (heap, login.config).
+            - name: ACTIVEMQ_OPTS
+              value: >-
+                -XX:InitialRAMPercentage={{ .Values.broker.jvm.initialRAMPercentage }}
+                -XX:MaxRAMPercentage={{ .Values.broker.jvm.maxRAMPercentage }}
+                -Djava.util.logging.config.file=logging.properties
+                -Djava.security.auth.login.config=/opt/activemq/conf/login.config
+                {{ .Values.broker.jvm.extraOpts }}
+            - name: ACTIVEMQ_ADMIN_LOGIN
+              valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.adminUser }} } }
+            - name: ACTIVEMQ_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.adminPassword }} } }
+            - name: BROKER_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.brokerUser }} } }
+            - name: BROKER_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.brokerPassword }} } }
+            {{- if not $shared }}
+            {{- $j := .Values.persistence.jdbc }}
+            - name: AMQ_JDBC_URL
+              value: {{ $j.url | quote }}
+            - name: AMQ_JDBC_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ $j.existingSecret.name }}, key: {{ $j.existingSecret.keys.username }} } }
+            - name: AMQ_JDBC_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $j.existingSecret.name }}, key: {{ $j.existingSecret.keys.password }} } }
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - { name: openwire, containerPort: {{ $t.openwire.port | int }} }
+            {{- if $t.stomp.enabled }}
+            - { name: stomp, containerPort: {{ $t.stomp.port | int }} }
+            {{- end }}
+            {{- if $t.amqp.enabled }}
+            - { name: amqp, containerPort: {{ $t.amqp.port | int }} }
+            {{- end }}
+            - { name: console, containerPort: 8161 }
+          # Ready == master: the standby does not listen until it gets the lock.
+          readinessProbe:
+            tcpSocket: { port: openwire }
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          # No liveness probe on purpose: a TCP check would kill the healthy standby.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/activemq/conf/activemq.xml
+              subPath: activemq.xml
+              readOnly: true
+            - { name: data, mountPath: /opt/activemq/data }
+            - { name: logs, mountPath: /var/log/activemq }
+            {{- if $shared }}
+            - { name: store, mountPath: {{ $sv.mountPath }} }
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "amq.fullname" . }}-config
+        # per-pod scratch (logs, tmp); messages live in the shared store
+        - { name: data, emptyDir: {} }
+        - { name: logs, emptyDir: {} }
+        {{- if $shared }}
+        - name: store
+          persistentVolumeClaim:
+            claimName: {{ include "amq.claimName" . }}
+        {{- end }}

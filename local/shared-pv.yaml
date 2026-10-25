@@ -1,0 +1,14 @@
+# Static RWX volume backed by the host directory mounted into every kind worker.
+# The chart's PVC (storageClass amq-shared) binds to it.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: amq-local-store
+spec:
+  capacity: { storage: 5Gi }
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: amq-shared
+  hostPath:
+    path: /amq-store
+    type: DirectoryOrCreate

@@ -1,0 +1,63 @@
+{{- $t := .Values.broker.transports }}
+# Client Service. Only the master is Ready, so this always routes to the master.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amq.fullname" . }}
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+    amq.role: client
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "amq.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- $np := .Values.service.nodePorts }}
+    {{- $usesNodePort := has .Values.service.type (list "NodePort" "LoadBalancer") }}
+    - name: openwire
+      port: {{ $t.openwire.port | int }}
+      targetPort: openwire
+      {{- if and $usesNodePort $np.openwire }}
+      nodePort: {{ $np.openwire | int }}
+      {{- end }}
+    {{- if $t.stomp.enabled }}
+    - name: stomp
+      port: {{ $t.stomp.port | int }}
+      targetPort: stomp
+      {{- if and $usesNodePort $np.stomp }}
+      nodePort: {{ $np.stomp | int }}
+      {{- end }}
+    {{- end }}
+    {{- if $t.amqp.enabled }}
+    - name: amqp
+      port: {{ $t.amqp.port | int }}
+      targetPort: amqp
+      {{- if and $usesNodePort $np.amqp }}
+      nodePort: {{ $np.amqp | int }}
+      {{- end }}
+    {{- end }}
+    - name: console
+      port: {{ .Values.service.consolePort | int }}
+      targetPort: console
+      {{- if and $usesNodePort $np.console }}
+      nodePort: {{ $np.console | int }}
+      {{- end }}
+---
+# Headless Service: stable per-pod DNS for the StatefulSet, including the standby.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amq.fullname" . }}-hl
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "amq.selectorLabels" . | nindent 4 }}
+  ports:
+    - { name: openwire, port: {{ $t.openwire.port | int }}, targetPort: openwire }

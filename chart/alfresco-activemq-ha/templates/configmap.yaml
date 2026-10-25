@@ -1,0 +1,10 @@
+{{- include "amq.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amq.fullname" . }}-config
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+data:
+  activemq.xml: |-
+{{ tpl (.Files.Get "files/activemq.xml") . | indent 4 }}

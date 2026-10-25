@@ -1,0 +1,38 @@
+# Example production values (EKS + EFS). Adjust for your platform.
+image:
+  tag: 5.18-jre17-rockylinux8        # pin the full 5.18.NN tag you have validated
+
+auth:
+  existingSecret:
+    name: amq-credentials           # keys: ACTIVEMQ_ADMIN_LOGIN, ACTIVEMQ_ADMIN_PASSWORD,
+                                    #       BROKER_USERNAME, BROKER_PASSWORD
+
+persistence:
+  mode: sharedVolume
+  sharedVolume:
+    storageClass: efs-amq           # see examples/efs-storageclass.yaml
+    size: 50Gi
+    fixPermissions: false           # EFS access point enforces uid 33031 / gid 1000
+
+broker:
+  storeUsageLimit: "40 gb"
+  tempUsageLimit: "5 gb"
+
+resources:
+  requests: { cpu: "1", memory: 4Gi }
+  limits: { memory: 4Gi }
+
+priorityClassName: ""               # e.g. a high-priority class for platform services
+
+networkPolicy:
+  enabled: true
+  allowSameNamespace: true
+  allowedNamespaceLabels:
+    - kubernetes.io/metadata.name: alfresco
+
+# With an existing secret the chart can't copy credentials into the ACS
+# namespace; create that secret yourself (BROKER_URL/BROKER_USERNAME/BROKER_PASSWORD).
+alfrescoConnection:
+  enabled: true
+  namespace: alfresco
+  name: alfresco-message-broker

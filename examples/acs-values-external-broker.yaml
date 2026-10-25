@@ -1,0 +1,63 @@
+# Values for the Alfresco "alfresco-content-services" Helm chart (acs-deployment)
+# to use this broker instead of the bundled evaluation ActiveMQ.
+#
+# messageBroker.url goes into the umbrella chart's "alfresco-infrastructure"
+# ConfigMap (BROKER_URL), which every sub-chart already reads.
+#
+# Credentials come from the secret "alfresco-message-broker" (BROKER_USERNAME,
+# BROKER_PASSWORD), created by alfresco-activemq-ha when alfrescoConnection.enabled=true
+# in the namespace given by alfrescoConnection.namespace (the ACS namespace).
+# With existingSecretName set, the umbrella chart no longer creates its own
+# broker secret, but the sub-charts still point at that secret by default, so
+# each enabled sub-chart below must be pointed at the existing one too.
+activemq:
+  enabled: false
+
+messageBroker:
+  # Service of the broker release "amq" in namespace "amq"
+  url: failover:(nio://amq-alfresco-activemq-ha.amq.svc.cluster.local:61616)?timeout=3000&jms.useCompression=true
+  existingSecretName: alfresco-message-broker
+  # Only needed for KEDA autoscaling on queue depth:
+  # webConsole: amq-alfresco-activemq-ha.amq.svc.cluster.local:8161
+  # brokerName: alfresco-amq        # broker.name in the broker chart
+
+alfresco-repository:
+  configuration:
+    messageBroker:
+      existingSecret:
+        name: alfresco-message-broker
+
+alfresco-transform-service:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+alfresco-search-enterprise:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+alfresco-sync-service:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+alfresco-audit-storage:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+alfresco-ai-transformer:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+alfresco-connector-cic:
+  messageBroker:
+    existingSecret:
+      name: alfresco-message-broker
+
+# Key paths match acs-deployment's values.yaml. The "with external infrastructure"
+# doc page uses different, inconsistent keys for some sub-charts; values.yaml is
+# what the templates read. Re-check against the chart version you deploy:
+#   helm show values alfresco/alfresco-content-services --version <x> | grep -A6 messageBroker

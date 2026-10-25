@@ -1,0 +1,161 @@
+# -----------------------------------------------------------------------------
+# alfresco-activemq-ha
+# Active/standby ActiveMQ Classic 5.18 for Alfresco Content Services 25.2.
+# Both pods share one store; the pod holding the store lock is master, opens
+# its ports and is the only Ready pod, so the Service always points at it.
+# -----------------------------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+clusterDomain: cluster.local
+
+image:
+  # Alfresco's broker image. ACS 25.2 supports ActiveMQ 5.18.
+  # In production pin the full version, e.g. 5.18.NN-jre17-rockylinux8.
+  repository: alfresco/alfresco-activemq
+  tag: 5.18-jre17-rockylinux8
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# 2 = active + standby. 1 = no HA (dev only).
+replicaCount: 2
+
+broker:
+  name: alfresco-amq            # brokerName, identical on both pods
+  jvm:
+    initialRAMPercentage: 50
+    maxRAMPercentage: 70        # of the container memory limit
+    extraOpts: ""
+  memoryPercentOfJvmHeap: 70
+  storeUsageLimit: "15 gb"      # keep below the volume size
+  tempUsageLimit: "5 gb"
+  deadLetter:
+    individual: true            # DLQ.<queue> per queue instead of one shared ActiveMQ.DLQ
+  transports:
+    maximumConnections: 1000
+    maxFrameSize: 104857600
+    openwire: { enabled: true, port: 61616 }   # what Alfresco uses
+    stomp:    { enabled: false, port: 61613 }  # enable to run the Python test suite
+    amqp:     { enabled: false, port: 5672 }
+  # Raw XML appended inside <policyEntries>
+  extraPolicyEntries: ""
+
+auth:
+  # Admin: web console + broker. The image entrypoint writes it to
+  # users.properties / jetty-realm.properties; the broker config accepts it too.
+  adminUser: admin
+  adminPassword: ""             # required unless auth.existingSecret.name is set
+  # Application user the Alfresco components connect with.
+  brokerUser: alfresco
+  brokerPassword: ""            # required unless auth.existingSecret.name is set
+  existingSecret:
+    name: ""
+    keys:
+      adminUser: ACTIVEMQ_ADMIN_LOGIN
+      adminPassword: ACTIVEMQ_ADMIN_PASSWORD
+      brokerUser: BROKER_USERNAME
+      brokerPassword: BROKER_PASSWORD
+
+persistence:
+  # sharedVolume: KahaDB on one ReadWriteMany volume shared by all pods.
+  #               The volume MUST support POSIX (fcntl) locks across nodes:
+  #               EFS, Azure Files NFS, GCP Filestore, CephFS, NFSv4. Not EBS/Azure Disk/PD.
+  # jdbc:         JDBC store + lease locker on an external HA database.
+  #               Requires an image with the JDBC driver (see README).
+  mode: sharedVolume
+  sharedVolume:
+    existingClaim: ""
+    storageClass: ""
+    accessModes: [ReadWriteMany]
+    size: 20Gi
+    annotations: {}
+    mountPath: /var/lib/amq-store
+    kahadb:
+      journalMaxFileLength: 32mb
+      lockKeepAlivePeriod: 2000       # ms; master shuts down if it loses the lock
+      lockAcquireSleepInterval: 1000  # ms; how often the standby retries the lock
+    # Root init container that chowns the volume to the broker user (33031:1000).
+    # Disable on EFS access points (they enforce uid/gid) or under PSA "restricted".
+    fixPermissions: true
+  jdbc:
+    driverClassName: org.postgresql.Driver
+    url: ""                           # e.g. jdbc:postgresql://db.example:5432/activemq
+    existingSecret:
+      name: ""
+      keys: { username: JDBC_USERNAME, password: JDBC_PASSWORD }
+    maxTotal: 50
+    # The master renews its lease every lockKeepAlivePeriod; the lease lasts
+    # lockAcquireSleepInterval. Keep keepAlive < acquire. Failover ~= the lease.
+    lockKeepAlivePeriod: 5000
+    lockAcquireSleepInterval: 10000
+
+volumePermissions:
+  image: busybox:1.36
+
+# alfresco/alfresco-activemq runs as amq (uid 33031) in group Alfresco (gid 1000)
+podSecurityContext:
+  runAsUser: 33031
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: [ALL] }
+
+resources:
+  requests: { cpu: 500m, memory: 2Gi }
+  limits: { memory: 2Gi }
+
+# Ready == master. Keep it fast so the Service flips quickly after failover.
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 2
+  timeoutSeconds: 1
+  failureThreshold: 2
+  successThreshold: 1
+
+terminationGracePeriodSeconds: 60
+
+# hard: master and standby never share a node (recommended). soft: preferred only.
+antiAffinity: hard
+zoneSpread: true
+affinity: {}            # overrides the generated anti-affinity when set
+nodeSelector: {}
+tolerations: []
+priorityClassName: ""
+podAnnotations: {}
+podLabels: {}
+extraEnv: []
+
+service:
+  type: ClusterIP
+  annotations: {}
+  consolePort: 8161
+  # Fixed node ports when type is NodePort/LoadBalancer (e.g. for kind port mappings)
+  nodePorts:
+    openwire: null
+    stomp: null
+    amqp: null
+    console: null
+
+networkPolicy:
+  enabled: false
+  allowSameNamespace: true
+  # Namespaces (by labels) allowed to reach the broker, e.g. where ACS runs:
+  # allowedNamespaceLabels:
+  #   - kubernetes.io/metadata.name: alfresco
+  allowedNamespaceLabels: []
+
+# Connection details for the ACS Helm chart (messageBroker.existingSecretName):
+# a Secret with BROKER_URL / BROKER_USERNAME / BROKER_PASSWORD and a ConfigMap
+# with BROKER_URL, created in the namespace where ACS runs.
+alfrescoConnection:
+  enabled: true
+  namespace: ""                 # defaults to the release namespace
+  name: alfresco-message-broker
+  scheme: nio
+  urlOptions: "timeout=3000&jms.useCompression=true"
+
+tests:
+  enabled: true

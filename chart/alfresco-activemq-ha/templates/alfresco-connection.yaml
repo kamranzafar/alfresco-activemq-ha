@@ -1,0 +1,29 @@
+{{- if .Values.alfrescoConnection.enabled }}
+{{- $ns := default .Release.Namespace .Values.alfrescoConnection.namespace }}
+# Broker connection details for the Alfresco Helm charts
+# (messageBroker.existingSecretName / existingConfigMap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.alfrescoConnection.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+data:
+  BROKER_URL: {{ include "amq.brokerUrl" . | quote }}
+{{- if not .Values.auth.existingSecret.name }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.alfrescoConnection.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  BROKER_URL: {{ include "amq.brokerUrl" . | quote }}
+  BROKER_USERNAME: {{ .Values.auth.brokerUser | quote }}
+  BROKER_PASSWORD: {{ .Values.auth.brokerPassword | quote }}
+{{- end }}
+{{- end }}

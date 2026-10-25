@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Helm
+chart/*/charts/
+*.tgz
+
+# Local kind cluster broker store (created by local/up.sh)
+local/.amq-store/
+
+# graphify
+graphify-out/
+
+# Misc
+*.log
+*.swp
+.env

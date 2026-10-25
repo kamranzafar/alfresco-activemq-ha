@@ -1,0 +1,29 @@
+# Filestore StorageClass for alfresco-activemq-ha on GKE.
+#
+# Do NOT use GKE's built-in Filestore classes (standard-rwx, premium-rwx,
+# zonal-rwx, enterprise-rwx): they mount NFSv3, where locks are held by the
+# client (NLM). If the master's node is deleted while it holds the KahaDB lock
+# (node failure, autoscaler scale-down, upgrade surge, spot preemption), the
+# lock is not released and the standby can never take over.
+# NFSv4.1 uses server-side, lease-based locks: the lock frees when the dead
+# client's lease expires, so failover completes after node loss.
+#
+# Requirements:
+# - Filestore CSI driver enabled (default on Autopilot; on Standard:
+#   gcloud container clusters update CLUSTER --update-addons=GcpFilestoreCsiDriver=ENABLED)
+# - Regional tier with NFSv4.1: GKE 1.33.4-gke.1172000 or later.
+#   On an older 1.33 cluster use tier: zonal (single zone, the store is lost
+#   with that zone). Basic tiers (standard/premium) do not support NFSv4.1.
+# - Minimum instance size 1 TiB (set persistence.sharedVolume.size accordingly).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: filestore-nfsv41-regional
+provisioner: filestore.csi.storage.gke.io
+parameters:
+  tier: regional
+  protocol: NFS_V4_1
+  network: default        # the cluster's VPC; Shared VPC also needs connect-mode/reserved-ip-range
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain     # keep the Filestore instance (and messages) if the PVC is deleted

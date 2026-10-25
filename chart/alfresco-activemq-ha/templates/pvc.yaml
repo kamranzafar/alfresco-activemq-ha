@@ -1,0 +1,24 @@
+{{- $sv := .Values.persistence.sharedVolume }}
+{{- if and (eq .Values.persistence.mode "sharedVolume") (not $sv.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "amq.claimName" . }}
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+  annotations:
+    # keep the message store if the release is uninstalled
+    helm.sh/resource-policy: keep
+    {{- with $sv.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml $sv.accessModes | nindent 4 }}
+  {{- with $sv.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $sv.size }}
+{{- end }}

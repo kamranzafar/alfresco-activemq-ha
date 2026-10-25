@@ -1,0 +1,30 @@
+ActiveMQ {{ .Chart.AppVersion }} (active/standby) for Alfresco is deploying.
+
+1. Watch the pods. Expect ONE pod 1/1 (master) and ONE pod 0/1 (standby).
+   0/1 on the standby is correct: it waits for the store lock and only opens
+   its ports when the master goes away.
+
+     kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+2. Verify a persistent message round trip through the Service:
+
+     helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+3. Point Alfresco (ACS Helm chart values) at the broker:
+
+     activemq:
+       enabled: false
+     messageBroker:
+       url: {{ include "amq.brokerUrl" . }}
+{{- if .Values.alfrescoConnection.enabled }}
+       existingSecretName: {{ .Values.alfrescoConnection.name }}   # in namespace {{ default .Release.Namespace .Values.alfrescoConnection.namespace }}
+{{- end }}
+
+4. Web console (on the current master):
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "amq.fullname" . }} 8161:{{ .Values.service.consolePort }}
+
+5. updateStrategy is OnDelete, so `helm upgrade` does NOT restart pods.
+   After an upgrade that changes config or image, roll it out with:
+
+     scripts/rolling-restart.sh {{ .Release.Name }} {{ .Release.Namespace }}

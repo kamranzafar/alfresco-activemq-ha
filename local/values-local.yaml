@@ -1,0 +1,33 @@
+# Small-footprint values for a local single-node cluster (kind, minikube, Docker Desktop).
+auth:
+  adminPassword: admin
+  brokerPassword: alfresco
+
+replicaCount: 2
+antiAffinity: soft          # both pods may share the only node
+zoneSpread: false
+
+persistence:
+  mode: sharedVolume
+  sharedVolume:
+    storageClass: ""        # cluster default (kind: local-path "standard")
+    accessModes: [ReadWriteOnce]   # fine on one node: RWO means one *node*, not one pod
+    size: 2Gi
+    fixPermissions: true
+
+broker:
+  storeUsageLimit: "1 gb"
+  tempUsageLimit: "512 mb"
+  transports:
+    stomp: { enabled: true, port: 61613 }   # lets you point the Python test suite at it
+
+resources:
+  requests: { cpu: 100m, memory: 768Mi }
+  limits: { memory: 768Mi }
+
+service:
+  type: NodePort            # the Service keeps following the master; port-forward would not
+  nodePorts: { openwire: 30616, stomp: 30613, console: 30161 }
+
+alfrescoConnection:
+  enabled: false

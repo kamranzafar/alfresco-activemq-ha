@@ -1,0 +1,9 @@
+# Layer on top of values-local.yaml for the 3-worker kind cluster.
+replicaCount: 3             # one broker per "zone"; set 2 if you prefer
+antiAffinity: hard          # brokers on different nodes, like production
+zoneSpread: true
+persistence:
+  sharedVolume:
+    storageClass: amq-shared        # binds to local/shared-pv.yaml
+    accessModes: [ReadWriteMany]
+    size: 5Gi

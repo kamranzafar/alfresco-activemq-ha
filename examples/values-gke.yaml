@@ -1,0 +1,61 @@
+# Example values for GKE (Standard or Autopilot) with Filestore. Adjust for your platform.
+# Apply examples/gke-filestore-storageclass.yaml first.
+image:
+  tag: 5.18-jre17-rockylinux8        # pin the full 5.18.NN tag you have validated
+
+auth:
+  existingSecret:
+    name: amq-credentials           # keys: ACTIVEMQ_ADMIN_LOGIN, ACTIVEMQ_ADMIN_PASSWORD,
+                                    #       BROKER_USERNAME, BROKER_PASSWORD
+                                    # e.g. synced from Secret Manager by External Secrets
+
+persistence:
+  mode: sharedVolume
+  sharedVolume:
+    storageClass: filestore-nfsv41-regional   # NFSv4.1; see the StorageClass for why
+    size: 1Ti                                 # Filestore minimum
+    # Filestore exports default to NO_ROOT_SQUASH with a root-owned share, so
+    # the root init container is needed to hand the store to uid 33031.
+    fixPermissions: true
+
+broker:
+  storeUsageLimit: "100 gb"
+  tempUsageLimit: "10 gb"
+
+# Autopilot sets limits equal to requests, so request what the broker needs.
+resources:
+  requests: { cpu: "1", memory: 4Gi }
+  limits: { memory: 4Gi }
+
+# Regional cluster: master and standby on different nodes, spread across zones.
+antiAffinity: hard
+zoneSpread: true
+
+# Enforced only with GKE Dataplane V2 (default on Autopilot) or network policy enforcement enabled.
+networkPolicy:
+  enabled: true
+  allowSameNamespace: true
+  allowedNamespaceLabels:
+    - kubernetes.io/metadata.name: alfresco
+
+# Only if clients outside the cluster (e.g. VMs in the same VPC) need the broker:
+# service:
+#   type: LoadBalancer
+#   annotations:
+#     networking.gke.io/load-balancer-type: Internal
+
+# With an existing secret the chart can't copy credentials into the ACS
+# namespace; create that secret yourself (BROKER_URL/BROKER_USERNAME/BROKER_PASSWORD).
+alfrescoConnection:
+  enabled: true
+  namespace: alfresco
+  name: alfresco-message-broker
+
+# Alternative without Filestore: Cloud SQL for PostgreSQL with HA (regional),
+# a dedicated database, and an image containing the PostgreSQL driver (see README).
+# persistence:
+#   mode: jdbc
+#   jdbc:
+#     url: jdbc:postgresql://<cloud-sql-private-ip>:5432/activemq
+#     existingSecret:
+#       name: amq-db                # keys JDBC_USERNAME / JDBC_PASSWORD

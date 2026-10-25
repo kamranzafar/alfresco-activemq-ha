@@ -1,0 +1,38 @@
+{{- if .Values.tests.enabled }}
+{{- $ak := .Values.auth.existingSecret.keys }}
+# helm test: send 10 persistent messages through the Service and consume them back.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "amq.fullname" . }}-test
+  labels:
+    {{- include "amq.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: roundtrip
+      image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command: ["/bin/bash", "-ec"]
+      args:
+        - |
+          URL="tcp://{{ include "amq.fullname" . }}:{{ .Values.broker.transports.openwire.port | int }}"
+          Q="queue://helm.test.$(date +%s)"
+          cd /opt/activemq
+          timeout 120 bin/activemq producer --brokerUrl "$URL" --user "$BROKER_USERNAME" --password "$BROKER_PASSWORD" \
+            --destination "$Q" --messageCount 10 --persistent true
+          timeout 120 bin/activemq consumer --brokerUrl "$URL" --user "$BROKER_USERNAME" --password "$BROKER_PASSWORD" \
+            --destination "$Q" --messageCount 10
+          echo "round trip OK"
+      env:
+        - name: BROKER_USERNAME
+          valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.brokerUser }} } }
+        - name: BROKER_PASSWORD
+          valueFrom: { secretKeyRef: { name: {{ include "amq.secretName" . }}, key: {{ $ak.brokerPassword }} } }
+{{- end }}

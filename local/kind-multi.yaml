@@ -1,0 +1,18 @@
+# Control plane + 3 workers ("zones" a/b/c). Every worker mounts the SAME host
+# directory at /amq-store, so pods on different nodes share one store and the
+# KahaDB file lock is real across nodes (all kind nodes share the host kernel).
+# __STORE__ is replaced by up.sh with an absolute path.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 30616, hostPort: 61616 }
+      - { containerPort: 30613, hostPort: 61613 }
+      - { containerPort: 30161, hostPort: 8161 }
+  - role: worker
+    extraMounts: [{ hostPath: __STORE__, containerPath: /amq-store }]
+  - role: worker
+    extraMounts: [{ hostPath: __STORE__, containerPath: /amq-store }]
+  - role: worker
+    extraMounts: [{ hostPath: __STORE__, containerPath: /amq-store }]

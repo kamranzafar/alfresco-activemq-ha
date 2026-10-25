@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Active/standby (shared-store master/slave) ActiveMQ Classic 5.18 for
+  Alfresco Content Services, for installs WITHOUT the Helm chart (VMs, plain Docker).
+  Same broker settings as chart/alfresco-activemq-ha/files/activemq.xml.
+
+  Use the SAME file on every broker node, at $ACTIVEMQ_HOME/conf/activemq.xml.
+
+  1. Mount one shared directory on every node at /mnt/amq-shared. It must support
+     POSIX (fcntl) locks across hosts: NFSv4, EFS, Azure Files NFS, Filestore, CephFS.
+     The lock is the only thing preventing two masters, so never use per-node disks
+     or SMB/CIFS. Make it writable by the user running ActiveMQ.
+  2. Add these keys to $ACTIVEMQ_HOME/conf/credentials.properties on every node
+     (or export them as environment variables of the same name):
+       admin.username=admin
+       admin.password=<admin-pw>
+       alfresco.username=alfresco
+       alfresco.password=<alfresco-pw>
+     Use the admin user for the web console too (conf/jetty-realm.properties).
+  3. Start ActiveMQ on every node. The first node to take the lock on
+     /mnt/amq-shared/kahadb is master and opens 61616; the others log
+     "Database ... is locked ... waiting" and do not listen until it frees.
+  4. Point Alfresco at ALL nodes; the client connects to whichever is listening:
+       failover:(nio://amq1:61616,nio://amq2:61616)?randomize=false&timeout=3000&jms.useCompression=true
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+         http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+         http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+  <!-- Resolves ${...} from credentials.properties, JVM system properties and environment variables -->
+  <bean class="org.springframework.context.support.PropertySourcesPlaceholderConfigurer">
+    <property name="locations">
+      <value>file:${activemq.conf}/credentials.properties</value>
+    </property>
+    <property name="ignoreResourceNotFound" value="true"/>
+  </bean>
+
+  <!-- brokerName must be identical on every node -->
+  <broker xmlns="http://activemq.apache.org/schema/core"
+          brokerName="alfresco-amq"
+          dataDirectory="${activemq.data}"
+          persistent="true"
+          useJmx="true"
+          advisorySupport="true"
+          schedulerSupport="false">
+
+    <destinationPolicy>
+      <policyMap>
+        <policyEntries>
+          <policyEntry queue=">" producerFlowControl="true">
+            <!-- DLQ.<queue> per queue instead of one shared ActiveMQ.DLQ -->
+            <deadLetterStrategy>
+              <individualDeadLetterStrategy queuePrefix="DLQ." useQueueForQueueMessages="true" processExpired="false"/>
+            </deadLetterStrategy>
+          </policyEntry>
+          <policyEntry topic=">">
+            <pendingMessageLimitStrategy>
+              <constantPendingMessageLimitStrategy limit="1000"/>
+            </pendingMessageLimitStrategy>
+          </policyEntry>
+        </policyEntries>
+      </policyMap>
+    </destinationPolicy>
+
+    <managementContext>
+      <managementContext createConnector="false"/>
+    </managementContext>
+
+    <persistenceAdapter>
+      <!-- Shared KahaDB: whoever holds the file lock is master.
+           lockKeepAlivePeriod: the master re-checks its lock every 2s and shuts down if lost.
+           lockAcquireSleepInterval: standbys retry the lock every 1s. -->
+      <kahaDB directory="/mnt/amq-shared/kahadb"
+              journalMaxFileLength="32mb"
+              lockKeepAlivePeriod="2000">
+        <locker>
+          <shared-file-locker lockAcquireSleepInterval="1000"/>
+        </locker>
+      </kahaDB>
+      <!-- No shared file system? Use an HA database instead (PostgreSQL driver jar in lib/optional):
+      <jdbcPersistenceAdapter dataSource="#jdbc-ds" createTablesOnStartup="true" lockKeepAlivePeriod="5000">
+        <locker>
+          <lease-database-locker lockAcquireSleepInterval="10000"/>
+        </locker>
+      </jdbcPersistenceAdapter>
+      with, outside <broker>:
+      <bean id="jdbc-ds" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
+        <property name="driverClassName" value="org.postgresql.Driver"/>
+        <property name="url" value="jdbc:postgresql://db.example:5432/activemq"/>
+        <property name="username" value="${jdbc.username}"/>
+        <property name="password" value="${jdbc.password}"/>
+        <property name="maxTotal" value="50"/>
+        <property name="poolPreparedStatements" value="true"/>
+      </bean>
+      -->
+    </persistenceAdapter>
+
+    <plugins>
+      <simpleAuthenticationPlugin anonymousAccessAllowed="false">
+        <users>
+          <authenticationUser username="${admin.username}" password="${admin.password}" groups="admins,users"/>
+          <authenticationUser username="${alfresco.username}" password="${alfresco.password}" groups="users"/>
+        </users>
+      </simpleAuthenticationPlugin>
+    </plugins>
+
+    <systemUsage>
+      <systemUsage>
+        <memoryUsage><memoryUsage percentOfJvmHeap="70"/></memoryUsage>
+        <!-- keep below the size of the shared volume -->
+        <storeUsage><storeUsage limit="15 gb"/></storeUsage>
+        <tempUsage><tempUsage limit="5 gb"/></tempUsage>
+      </systemUsage>
+    </systemUsage>
+
+    <transportConnectors>
+      <transportConnector name="openwire" uri="tcp://0.0.0.0:61616?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/>
+    </transportConnectors>
+
+    <shutdownHooks>
+      <bean xmlns="http://www.springframework.org/schema/beans" class="org.apache.activemq.hooks.SpringContextHook"/>
+    </shutdownHooks>
+  </broker>
+
+  <!-- Web console on 8161 -->
+  <import resource="jetty.xml"/>
+</beans>

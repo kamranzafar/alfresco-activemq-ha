@@ -1,0 +1,10 @@
+# One-node kind cluster. Both broker pods run on this node and share an
+# ordinary (ReadWriteOnce) volume. The file lock works because it's one kernel.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:                       # host port -> fixed NodePort
+      - { containerPort: 30616, hostPort: 61616 }   # OpenWire
+      - { containerPort: 30613, hostPort: 61613 }   # STOMP (Python test suite)
+      - { containerPort: 30161, hostPort: 8161 }    # web console

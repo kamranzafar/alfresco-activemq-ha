@@ -1,0 +1,10 @@
+apiVersion: v2
+name: alfresco-activemq-ha
+description: >-
+  Highly available ActiveMQ Classic for Alfresco Content Services 25.2:
+  shared-store master/slave (active + standby) behind a master-only Service.
+type: application
+version: 1.0.0
+appVersion: "5.18"
+kubeVersion: ">=1.25.0-0"
+keywords: [activemq, alfresco, acs, messaging, high-availability]

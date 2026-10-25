@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Rendered by Helm ({{ .Chart.Name }}-{{ .Chart.Version }}). Edit values.yaml, not this file.
+
+  Active/standby ActiveMQ Classic 5.18 for Alfresco Content Services.
+  ${...} placeholders are resolved at broker start-up from JVM system properties
+  (activemq.data, activemq.brokername) and environment variables (credentials).
+-->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+         http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+         http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+  <bean class="org.springframework.context.support.PropertySourcesPlaceholderConfigurer"/>
+{{- if eq .Values.persistence.mode "jdbc" }}
+
+  <bean id="jdbc-ds" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
+    <property name="driverClassName" value="{{ .Values.persistence.jdbc.driverClassName }}"/>
+    <property name="url" value="${AMQ_JDBC_URL}"/>
+    <property name="username" value="${AMQ_JDBC_USERNAME}"/>
+    <property name="password" value="${AMQ_JDBC_PASSWORD}"/>
+    <property name="maxTotal" value="{{ .Values.persistence.jdbc.maxTotal | int }}"/>
+    <property name="poolPreparedStatements" value="true"/>
+  </bean>
+{{- end }}
+
+  <broker xmlns="http://activemq.apache.org/schema/core"
+          brokerName="${activemq.brokername}"
+          dataDirectory="${activemq.data}"
+          persistent="true"
+          useJmx="true"
+          advisorySupport="true"
+          schedulerSupport="false">
+
+    <destinationPolicy>
+      <policyMap>
+        <policyEntries>
+          <policyEntry queue=">" producerFlowControl="true">
+{{- if .Values.broker.deadLetter.individual }}
+            <deadLetterStrategy>
+              <individualDeadLetterStrategy queuePrefix="DLQ." useQueueForQueueMessages="true" processExpired="false"/>
+            </deadLetterStrategy>
+{{- end }}
+          </policyEntry>
+          <policyEntry topic=">">
+            <pendingMessageLimitStrategy>
+              <constantPendingMessageLimitStrategy limit="1000"/>
+            </pendingMessageLimitStrategy>
+          </policyEntry>
+{{- with .Values.broker.extraPolicyEntries }}
+{{ . | indent 10 }}
+{{- end }}
+        </policyEntries>
+      </policyMap>
+    </destinationPolicy>
+
+    <managementContext>
+      <managementContext createConnector="false"/>
+    </managementContext>
+
+    <persistenceAdapter>
+{{- if eq .Values.persistence.mode "jdbc" }}
+      <!-- Lease locker: the master renews a lease row; the standby takes over when it expires. -->
+      <jdbcPersistenceAdapter dataSource="#jdbc-ds"
+                              createTablesOnStartup="true"
+                              lockKeepAlivePeriod="{{ .Values.persistence.jdbc.lockKeepAlivePeriod | int }}">
+        <locker>
+          <lease-database-locker lockAcquireSleepInterval="{{ .Values.persistence.jdbc.lockAcquireSleepInterval | int }}"/>
+        </locker>
+      </jdbcPersistenceAdapter>
+{{- else }}
+{{- $k := .Values.persistence.sharedVolume.kahadb }}
+      <!-- Shared KahaDB: whoever holds the file lock is master. -->
+      <kahaDB directory="{{ .Values.persistence.sharedVolume.mountPath }}/kahadb"
+              journalMaxFileLength="{{ $k.journalMaxFileLength }}"
+              lockKeepAlivePeriod="{{ $k.lockKeepAlivePeriod | int }}">
+        <locker>
+          <shared-file-locker lockAcquireSleepInterval="{{ $k.lockAcquireSleepInterval | int }}"/>
+        </locker>
+      </kahaDB>
+{{- end }}
+    </persistenceAdapter>
+
+    <plugins>
+      <simpleAuthenticationPlugin anonymousAccessAllowed="false">
+        <users>
+          <authenticationUser username="${ACTIVEMQ_ADMIN_LOGIN}" password="${ACTIVEMQ_ADMIN_PASSWORD}" groups="admins,users"/>
+          <authenticationUser username="${BROKER_USERNAME}" password="${BROKER_PASSWORD}" groups="users"/>
+        </users>
+      </simpleAuthenticationPlugin>
+    </plugins>
+
+    <systemUsage>
+      <systemUsage>
+        <memoryUsage><memoryUsage percentOfJvmHeap="{{ .Values.broker.memoryPercentOfJvmHeap | int }}"/></memoryUsage>
+        <storeUsage><storeUsage limit="{{ .Values.broker.storeUsageLimit }}"/></storeUsage>
+        <tempUsage><tempUsage limit="{{ .Values.broker.tempUsageLimit }}"/></tempUsage>
+      </systemUsage>
+    </systemUsage>
+
+{{- $t := .Values.broker.transports }}
+{{- $opts := printf "maximumConnections=%d&amp;wireFormat.maxFrameSize=%d" ($t.maximumConnections | int) ($t.maxFrameSize | int64) }}
+    <transportConnectors>
+{{- if $t.openwire.enabled }}
+      <transportConnector name="openwire" uri="tcp://0.0.0.0:{{ $t.openwire.port | int }}?{{ $opts }}"/>
+{{- end }}
+{{- if $t.stomp.enabled }}
+      <transportConnector name="stomp" uri="stomp://0.0.0.0:{{ $t.stomp.port | int }}?{{ $opts }}"/>
+{{- end }}
+{{- if $t.amqp.enabled }}
+      <transportConnector name="amqp" uri="amqp://0.0.0.0:{{ $t.amqp.port | int }}?{{ $opts }}"/>
+{{- end }}
+    </transportConnectors>
+
+    <shutdownHooks>
+      <bean xmlns="http://www.springframework.org/schema/beans" class="org.apache.activemq.hooks.SpringContextHook"/>
+    </shutdownHooks>
+  </broker>
+
+  <!-- Web console; the image's jetty.xml already binds 0.0.0.0 -->
+  <import resource="jetty.xml"/>
+</beans>
