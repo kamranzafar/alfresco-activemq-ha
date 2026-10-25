@@ -26,6 +26,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      $aff
       containers:
         - name: c
           image: $img
@@ -39,12 +40,17 @@ YAML
 }
 
 m=$(master); echo "master: $m   queue: $q   messages: $N"
+aff=""
+if [[ $MODE == node ]]; then
+  # keep the clients off the node we are about to stop, or they die with it
+  node=$(kubectl -n "$NS" get pod "$m" -o jsonpath='{.spec.nodeName}')
+  aff="affinity: { nodeAffinity: { requiredDuringSchedulingIgnoredDuringExecution: { nodeSelectorTerms: [ { matchExpressions: [ { key: kubernetes.io/hostname, operator: NotIn, values: [$node] } ] } ] } } }"
+fi
 job smoke-consumer consumer --messageCount "$N"
 job smoke-producer producer --messageCount "$N" --sleep "$SLEEP_MS" --persistent true
 sleep $(( N * SLEEP_MS / 3000 + 5 ))     # roughly a third of the way through
 
 if [[ $MODE == node ]]; then
-  node=$(kubectl -n "$NS" get pod "$m" -o jsonpath='{.spec.nodeName}')
   echo "stopping kind node $node (simulated node failure)"
   docker stop "$node" >/dev/null
 else
@@ -52,7 +58,8 @@ else
   kubectl -n "$NS" delete pod "$m" --grace-period=0 --force >/dev/null 2>&1
 fi
 t0=$SECONDS
-until n=$(master) && [[ -n $n && $n != "$m" ]]; do sleep 1; done
+# a dead node's endpoint lingers until it goes NotReady, so look for any other ready pod
+until n=$(master | tr ' ' '\n' | grep -vx "$m" | head -1) && [[ -n $n ]]; do sleep 1; done
 echo "new master: $n (Service switched after ~$((SECONDS - t0))s)"
 
 if kubectl -n "$NS" wait --for=condition=complete job/smoke-consumer --timeout=300s >/dev/null 2>&1; then

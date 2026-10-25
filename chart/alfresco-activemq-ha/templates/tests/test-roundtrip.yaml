@@ -5,8 +5,13 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: {{ include "amq.fullname" . }}-test
+  # Not amq.labels: the broker selector labels would put this pod under the
+  # brokers' anti-affinity (unschedulable when every node has a broker) and Services.
   labels:
-    {{- include "amq.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ include "amq.name" . }}-test
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
