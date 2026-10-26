@@ -111,6 +111,25 @@ If you set `auth.existingSecret.name` (as the production and GKE examples do), t
 
 **About `timeout=3000`.** This is Alfresco's default. A send blocked by a broker outage fails after 3 seconds instead of waiting. A failover caused by a pod or process dying takes about 2 to 5 seconds, so expect a few logged send errors during it. Node or network failures on NFS storage take longer, because the old master's lock is held until the NFS lease expires. Measure your failover time, for example by deleting the master pod while ACS is under load. Then decide whether to raise `timeout` or accept retries.
 
+### Without the ACS Helm chart: `alfresco-global.properties`
+
+For a repository installed on VMs, from the distribution zip, or with Docker Compose, set the broker in `alfresco-global.properties` on **every** repository node:
+
+```properties
+# List every broker; the failover transport connects to whichever is master.
+# randomize=false tries them in order instead of picking one at random.
+messaging.broker.url=failover:(nio://amq1:61616,nio://amq2:61616)?randomize=false&timeout=3000&jms.useCompression=true
+messaging.broker.username=alfresco
+messaging.broker.password=<alfresco-pw>
+```
+
+On Kubernetes with a single Service in front of the master, the URL needs only that Service: `failover:(nio://amq-alfresco-activemq-ha.amq.svc.cluster.local:61616)?timeout=3000&jms.useCompression=true`.
+
+- **What they are:** these are the repository's Messaging subsystem properties. The ACS Helm chart sets the same three as `-Dmessaging.broker.*` JVM options from `BROKER_URL`, `BROKER_USERNAME` and `BROKER_PASSWORD`. In Docker, you can pass them the same way in `JAVA_OPTS`.
+- **Credentials are required:** the broker rejects anonymous connections, and Alfresco's defaults for username and password are empty.
+- **Messaging stays enabled:** keep `messaging.subsystem.autoStart=true`, which is the default.
+- **Other services** (Transform Service, Search Enterprise, Sync Service and the rest) don't read `alfresco-global.properties`. Give each one the same failover URL and credentials in its own configuration.
+
 ## Day-2 operations
 
 **Config or image change:** run `helm upgrade`, then `scripts/rolling-restart.sh amq amq`. Pods are not restarted by the upgrade itself. The script restarts the standby first, then hands over from the master, so the change costs one failover.
