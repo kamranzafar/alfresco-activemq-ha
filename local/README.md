@@ -28,7 +28,9 @@ From your machine, use these addresses:
 |---|---|
 | OpenWire | `tcp://localhost:61616`, with user `alfresco`/`alfresco` or admin `admin`/`admin` |
 | STOMP | `localhost:61613` |
-| Console | http://localhost:8161 |
+| Console | `kubectl -n amq port-forward svc/amq-alfresco-activemq-ha 8162:8161`, then http://localhost:8162 |
+
+ActiveMQ 6 only accepts console requests from loopback, so the console's NodePort (8161) answers 403. Port-forward reaches it from inside the pod.
 
 These go through a fixed NodePort mapped by kind, so they **keep working across failovers**. `kubectl port-forward` would not: it pins to one pod and dies with it.
 

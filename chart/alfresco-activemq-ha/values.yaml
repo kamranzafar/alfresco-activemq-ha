@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------
 # alfresco-activemq-ha
-# Active/standby ActiveMQ Classic 5.18 for Alfresco Content Services 25.2.
+# Active/standby ActiveMQ Classic 6.2 for Alfresco Content Services.
 # Both pods share one store; the pod holding the store lock is master, opens
 # its ports and is the only Ready pod, so the Service always points at it.
 # -----------------------------------------------------------------------------
@@ -9,10 +9,10 @@ fullnameOverride: ""
 clusterDomain: cluster.local
 
 image:
-  # Alfresco's broker image. ACS 25.2 supports ActiveMQ 5.18.
-  # In production pin the full version, e.g. 5.18.NN-jre17-rockylinux8.
+  # Alfresco's broker image. Check the ACS supported-platforms matrix for your release.
+  # Pinned to a full patch version; 6.2-jre17-rockylinux8 floats to the latest 6.2.x.
   repository: alfresco/alfresco-activemq
-  tag: 5.18-jre17-rockylinux8
+  tag: 6.2.6-jre17-rockylinux8
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

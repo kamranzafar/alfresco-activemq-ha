@@ -1,6 +1,6 @@
 # Example production values (EKS + EFS). Adjust for your platform.
 image:
-  tag: 5.18-jre17-rockylinux8        # pin the full 5.18.NN tag you have validated
+  tag: 6.2.6-jre17-rockylinux8       # pin the full 6.2.N tag you have validated
 
 auth:
   existingSecret:

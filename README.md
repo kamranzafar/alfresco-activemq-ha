@@ -1,6 +1,8 @@
 # Highly available ActiveMQ for Alfresco Content Services 25.2 on Kubernetes
 
-This is a Helm chart for an **active/standby ActiveMQ Classic 5.18** broker for ACS 25.2. 5.18 is the broker version listed in the ACS 25.2 supported-platforms matrix. The chart uses Alfresco's own image, `alfresco/alfresco-activemq:5.18-jre17-rockylinux8`, and replaces the bundled single-pod evaluation ActiveMQ in the ACS Helm chart.
+This is a Helm chart for an **active/standby ActiveMQ Classic 6.2** broker for ACS. The chart uses Alfresco's own image, `alfresco/alfresco-activemq:6.2.6-jre17-rockylinux8`, and replaces the bundled single-pod evaluation ActiveMQ in the ACS Helm chart.
+
+> **Broker version:** the ACS 25.2 supported-platforms matrix lists ActiveMQ 5.18; Alfresco moved to ActiveMQ 6.x in ACS 26.1. Check the matrix for your ACS release before running 6.2 in production. To stay on 5.18, set `image.tag=5.18-jre17-rockylinux8`; the chart works with both.
 
 ```
  Alfresco repo ─┐
@@ -126,7 +128,7 @@ If you set `auth.existingSecret.name` (as the production and GKE examples do), t
 Build an image with the PostgreSQL driver. 42.7.5 is the driver version in the ACS 25.2 matrix. Commons DBCP2 already ships in ActiveMQ's `lib/optional`.
 
 ```dockerfile
-FROM alfresco/alfresco-activemq:5.18-jre17-rockylinux8
+FROM alfresco/alfresco-activemq:6.2.6-jre17-rockylinux8
 ADD --chown=33031:1000 --chmod=644 \
   https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar \
   /opt/activemq/lib/optional/
@@ -134,7 +136,7 @@ ADD --chown=33031:1000 --chmod=644 \
 
 ```bash
 helm install amq ./chart/alfresco-activemq-ha -n amq \
-  --set image.repository=<registry>/alfresco-activemq-pg --set image.tag=5.18 \
+  --set image.repository=<registry>/alfresco-activemq-pg --set image.tag=6.2.6 \
   --set persistence.mode=jdbc \
   --set persistence.jdbc.url=jdbc:postgresql://<db-host>:5432/activemq \
   --set persistence.jdbc.existingSecret.name=amq-db      # keys JDBC_USERNAME / JDBC_PASSWORD
@@ -146,15 +148,39 @@ Things to know about JDBC mode:
 - **Clocks:** the lease locker depends on node clocks being in sync (NTP).
 - **Throughput:** lower than KahaDB, which is usually fine at Alfresco's message volumes.
 
+## Without Kubernetes: Docker image
+
+`standalone/activemq.xml` is the same broker setup for plain Docker or VMs, and `standalone/Dockerfile` bakes it into Alfresco's 6.2.6 image:
+
+```bash
+docker build -t alfresco-activemq-ha:6.2.6 standalone
+# on every broker host, with the same shared directory (POSIX locks across hosts) at /mnt/amq-shared:
+docker run -d --name amq1 -p 61616:61616 -v /mnt/amq-shared:/mnt/amq-shared \
+  -e ADMIN_PASSWORD=<admin-pw> -e ALFRESCO_PASSWORD=<alfresco-pw> \
+  -e ACTIVEMQ_ADMIN_LOGIN=admin -e ACTIVEMQ_ADMIN_PASSWORD=<admin-pw> \
+  alfresco-activemq-ha:6.2.6
+```
+
+The first broker to lock `/mnt/amq-shared/kahadb` is master; the others wait without listening. Point Alfresco at all hosts: `failover:(nio://amq1:61616,nio://amq2:61616)?randomize=false&timeout=3000&jms.useCompression=true`. The broker won't start without both passwords.
+
+To try it on one machine, `standalone/docker-compose.yaml` runs two brokers sharing a named volume (passwords default to `admin`/`alfresco`):
+
+```bash
+docker compose -f standalone/docker-compose.yaml up -d --build
+docker compose -f standalone/docker-compose.yaml kill amq1    # or amq2, whichever is master
+```
+
+Connect with `failover:(tcp://localhost:61616,tcp://localhost:61617)?randomize=false`.
+
 ## On AWS: consider Amazon MQ instead
 
-Amazon MQ for ActiveMQ in active/standby across availability zones gives you the same architecture, with storage, patching and failover managed by AWS. If you go that way, skip this chart. Set `messageBroker.url` to `failover:(ssl://<broker-1>:61617,ssl://<broker-2>:61617)?randomize=false&timeout=3000` and keep the rest of the ACS values above. Check that Amazon MQ offers a 5.18 engine version so you stay on the supported broker version.
+Amazon MQ for ActiveMQ in active/standby across availability zones gives you the same architecture, with storage, patching and failover managed by AWS. If you go that way, skip this chart. Set `messageBroker.url` to `failover:(ssl://<broker-1>:61617,ssl://<broker-2>:61617)?randomize=false&timeout=3000` and keep the rest of the ACS values above. Pick the Amazon MQ engine version that matches the broker version supported for your ACS release.
 
 ## Values reference (main ones)
 
 | Key | Default | Notes |
 |---|---|---|
-| `image.tag` | `5.18-jre17-rockylinux8` | Pin `5.18.NN-…` in production |
+| `image.tag` | `6.2.6-jre17-rockylinux8` | `5.18-jre17-rockylinux8` also works |
 | `replicaCount` | `2` | `1` means no HA |
 | `persistence.mode` | `sharedVolume` | or `jdbc` |
 | `persistence.sharedVolume.storageClass` | `""` | Must be RWX with POSIX locks |

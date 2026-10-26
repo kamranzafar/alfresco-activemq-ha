@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Active/standby (shared-store master/slave) ActiveMQ Classic 5.18 for
+  Active/standby (shared-store master/slave) ActiveMQ Classic 6.2 for
   Alfresco Content Services, for installs WITHOUT the Helm chart (VMs, plain Docker).
   Same broker settings as chart/alfresco-activemq-ha/files/activemq.xml.
 
@@ -11,12 +11,15 @@
      The lock is the only thing preventing two masters, so never use per-node disks
      or SMB/CIFS. Make it writable by the user running ActiveMQ.
   2. Add these keys to $ACTIVEMQ_HOME/conf/credentials.properties on every node
-     (or export them as environment variables of the same name):
+     (or set environment variables ADMIN_USERNAME, ADMIN_PASSWORD, ALFRESCO_USERNAME,
+     ALFRESCO_PASSWORD; the Dockerfile next to this file does that):
        admin.username=admin
        admin.password=<admin-pw>
        alfresco.username=alfresco
        alfresco.password=<alfresco-pw>
-     Use the admin user for the web console too (conf/jetty-realm.properties).
+     Use the admin user for the web console too (conf/users.properties and
+     conf/groups.properties: admins=<admin-user>). The 6.x console only accepts
+     requests from localhost by default; see the InetAccessHandler in conf/jetty.xml.
   3. Start ActiveMQ on every node. The first node to take the lock on
      /mnt/amq-shared/kahadb is master and opens 61616; the others log
      "Database ... is locked ... waiting" and do not listen until it frees.
@@ -38,7 +41,8 @@
   </bean>
 
   <!-- brokerName must be identical on every node -->
-  <broker xmlns="http://activemq.apache.org/schema/core"
+  <!-- id="broker": the 6.x jetty.xml depends on a bean with this id -->
+  <broker xmlns="http://activemq.apache.org/schema/core" id="broker"
           brokerName="alfresco-amq"
           dataDirectory="${activemq.data}"
           persistent="true"

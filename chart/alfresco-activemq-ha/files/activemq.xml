@@ -2,7 +2,7 @@
 <!--
   Rendered by Helm ({{ .Chart.Name }}-{{ .Chart.Version }}). Edit values.yaml, not this file.
 
-  Active/standby ActiveMQ Classic 5.18 for Alfresco Content Services.
+  Active/standby ActiveMQ Classic 6.2 for Alfresco Content Services.
   ${...} placeholders are resolved at broker start-up from JVM system properties
   (activemq.data, activemq.brokername) and environment variables (credentials).
 -->
@@ -25,7 +25,8 @@
   </bean>
 {{- end }}
 
-  <broker xmlns="http://activemq.apache.org/schema/core"
+  <!-- id="broker": the 6.x jetty.xml depends on a bean with this id -->
+  <broker xmlns="http://activemq.apache.org/schema/core" id="broker"
           brokerName="${activemq.brokername}"
           dataDirectory="${activemq.data}"
           persistent="true"

@@ -1,0 +1,34 @@
+# Two-broker active/standby cluster on one Docker host, sharing one volume.
+#
+#   docker compose -f standalone/docker-compose.yaml up -d --build
+#
+# Whichever broker locks the shared KahaDB first is master and listens; the other
+# waits. Clients use both ports, and the failover transport finds the master:
+#   failover:(tcp://localhost:61616,tcp://localhost:61617)?randomize=false
+# Inside the Compose network: failover:(tcp://amq1:61616,tcp://amq2:61616)?randomize=false
+#
+# Passwords default to admin/alfresco for local use; override in .env or the shell.
+# On one host the shared lock is real (same kernel). Across hosts, replace the named
+# volume with an NFSv4/EFS mount that supports POSIX locks.
+x-broker: &broker
+  build: .
+  image: alfresco-activemq-ha:6.2.6
+  restart: unless-stopped
+  environment:
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+    ALFRESCO_PASSWORD: ${ALFRESCO_PASSWORD:-alfresco}
+    ACTIVEMQ_ADMIN_LOGIN: admin
+    ACTIVEMQ_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+  volumes:
+    - amq-store:/mnt/amq-shared
+
+services:
+  amq1:
+    <<: *broker
+    ports: ["61616:61616"]
+  amq2:
+    <<: *broker
+    ports: ["61617:61616"]
+
+volumes:
+  amq-store:

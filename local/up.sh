@@ -37,7 +37,7 @@ fi
 
 # Optional: pre-load the image to avoid Docker Hub rate limits (LOAD_IMAGE=1 ./up.sh)
 if [[ ${LOAD_IMAGE:-0} == 1 ]]; then
-  img=alfresco/alfresco-activemq:5.18-jre17-rockylinux8
+  img=alfresco/alfresco-activemq:6.2.6-jre17-rockylinux8
   docker pull "$img" && kind load docker-image "$img" --name "$CLUSTER"
 fi
 
@@ -58,6 +58,6 @@ cat <<INFO
 Master: $m
   OpenWire  tcp://localhost:61616       (user alfresco / alfresco, admin / admin)
   STOMP     localhost:61613
-  Console   http://localhost:8161
+  Console   kubectl -n $NS port-forward svc/$svc 8162:8161, then http://localhost:8162
 Next:  ./failover-smoke.sh      ../scripts/status.sh $REL $NS      ./down.sh
 INFO
